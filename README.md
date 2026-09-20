@@ -1,10 +1,12 @@
 # pure-line-room
 
-An interactive room drawn with vector line art using pure front-end code. I will continue to add more content to explore the creative boundaries of AI-generated art.
+一个纯前端代码绘制的矢量线条风格的可交互房间pure-line-room 二创 AI陪伴交互小人,感谢开源
 
-一个纯前端代码绘制的矢量线条风格的可交互房间，我将继续更新更多内容，以探索AI生成艺术的创作边界。
 
-Link/体验网址：[https://linehome.metagaruta.com/](https://linehome.metagaruta.com/)
+原项目地址：https://github.com/Animnia/pure-line-room
+原视频：BV1yTg16hEqP 原作者b站名：AN湯NA
+
+原项目Link/体验网址：[https://linehome.metagaruta.com/](https://linehome.metagaruta.com/)
 
 ---
 
