@@ -28,6 +28,10 @@ body.night #chat,body.night #bubble{background:#000;color:#fff;border-color:#fff
 body.night #inrow,body.night #send{border-color:#fff;}
 body.night #bubble::after{background:#000;border-color:#fff;}
 body.night #log::-webkit-scrollbar-thumb{background:#fff;}
+/* 右下角常驻的操作提示：不能吃指针事件，否则挡住拾取 */
+#hint{position:fixed;right:14px;bottom:15px;z-index:9;pointer-events:none;opacity:.35;color:#000;
+  font:11px/1.5 "PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;}
+body.night #hint{color:#fff;}
 </style>
 </head>
 <body>
@@ -36,6 +40,7 @@ body.night #log::-webkit-scrollbar-thumb{background:#fff;}
   <div id="inrow"><input id="msg" class="ui" placeholder="和小线说点什么…" autocomplete="off" spellcheck="false"><button id="send" class="ui">↵</button></div>
 </div>
 <div id="bubble"></div>
+<div id="hint">拖动旋转 · 滚轮缩放</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/lines/LineSegmentsGeometry.js"></script>
 <script src="https://unpkg.com/three@0.128.0/examples/js/lines/LineMaterial.js"></script>
@@ -46,8 +51,22 @@ body.night #log::-webkit-scrollbar-thumb{background:#fff;}
 const scene=new THREE.Scene();
 scene.background=new THREE.Color(0xffffff);
 const camera=new THREE.PerspectiveCamera(38,window.innerWidth/window.innerHeight,0.1,200);
-camera.position.set(14,10.5,14);
-camera.lookAt(0,1.9,0);
+/* --- 轨道相机：球坐标 + 注视点。room 那套是从原来的 (14,10.5,14) → (0,1.9,0) 反算出来的，
+       所以默认视角和以前一像素不差；yard 那套从院子右后上方看，能同时看到院子、门廊和房子背面。 --- */
+const PRESET={
+  room:{az:0.7854,pol:1.1608,r:21.587,t:[0,1.9,0]},
+  yard:{az:2.60,pol:0.72,r:14.5,t:[-0.5,1.3,-10.3]}
+};
+const view={az:PRESET.room.az,pol:PRESET.room.pol,r:PRESET.room.r,t:PRESET.room.t.slice()};
+let viewGoal=null,viewZone='room';
+function applyCamera(){
+  camera.position.set(
+    view.t[0]+view.r*Math.sin(view.pol)*Math.sin(view.az),
+    view.t[1]+view.r*Math.cos(view.pol),
+    view.t[2]+view.r*Math.sin(view.pol)*Math.cos(view.az));
+  camera.lookAt(view.t[0],view.t[1],view.t[2]);
+}
+applyCamera();
 const renderer=new THREE.WebGLRenderer({antialias:true});
 renderer.localClippingEnabled=true;
 renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
@@ -60,6 +79,10 @@ const FILL=new THREE.MeshBasicMaterial({color:0xffffff,polygonOffset:true,polygo
 const OUTMAT=new THREE.LineBasicMaterial({color:0x000000});
 const OUTFILL=new THREE.MeshBasicMaterial({color:0xffffff,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1});
 function ol(o){o.material=OUTMAT;return o;}
+
+/* 水汽、水波这类「额外」的透明线条材质。它们不是 MAT/FILL，所以要单独登记才能跟着
+   日夜换色、跟着灯锥裁剪 —— 不然夜里点灯，水汽会是白线画在白底上。 */
+const TINT=[];
 
 function V(x,y,z){return new THREE.Vector3(x,y,z);}
 function geo(pts){const a=[];for(const p of pts)a.push(V(p[0],p[1],p[2]));return new THREE.BufferGeometry().setFromPoints(a);}
@@ -85,16 +108,24 @@ function E(x){return x<0.5?2*x*x:1-Math.pow(-2*x+2,2)/2;}
 put(new THREE.Mesh(new THREE.PlaneGeometry(12,12),FILL),0,-0.002,0,-Math.PI/2,0,0);
 put(loop([[-6,0,-6],[6,0,-6],[6,0,6],[-6,0,6]]),0,0.01,0);
 for(let z=-5.2;z<6;z+=0.8) put(line([[-6,0.011,z],[6,0.011,z]]),0,0,0);
-put(box(12,7,0.24),0,3.5,-6.12);
+/* 后墙不再是一块实心板 —— 照着左墙掏窗洞的办法掏出门洞，门外才看得见院子 */
+const backShape=new THREE.Shape();
+backShape.moveTo(-6,0);backShape.lineTo(6,0);backShape.lineTo(6,7);backShape.lineTo(-6,7);backShape.closePath();
+const backHole=new THREE.Path();
+backHole.moveTo(-5.18,0);backHole.lineTo(-3.32,0);backHole.lineTo(-3.32,4.35);backHole.lineTo(-5.18,4.35);backHole.closePath();
+backShape.holes.push(backHole);
+put(edge(new THREE.ExtrudeGeometry(backShape,{depth:0.24,bevelEnabled:false})),0,0,-6.24);
 const wallShape=new THREE.Shape();
 wallShape.moveTo(-6,0);wallShape.lineTo(6,0);wallShape.lineTo(6,7);wallShape.lineTo(-6,7);wallShape.closePath();
 const wallHole=new THREE.Path();
 wallHole.moveTo(-2.0,2.2);wallHole.lineTo(1.0,2.2);wallHole.lineTo(1.0,4.8);wallHole.lineTo(-2.0,4.8);wallHole.closePath();
 wallShape.holes.push(wallHole);
 put(edge(new THREE.ExtrudeGeometry(wallShape,{depth:0.24,bevelEnabled:false})),-6.0,0,0,0,-Math.PI/2,0);
-put(box(12,0.32,0.07),0,0.16,-5.985);
+put(box(0.82,0.32,0.07),-5.59,0.16,-5.985);   // 踢脚线在门洞处断开
+put(box(9.32,0.32,0.07),1.34,0.16,-5.985);
 put(box(0.07,0.32,12),-5.985,0.16,0);
-put(box(12,0.07,0.05),0,1.05,-5.97);
+put(box(0.82,0.07,0.05),-5.59,1.05,-5.97);    // 护墙板线同样断开
+put(box(9.32,0.07,0.05),1.34,1.05,-5.97);
 put(box(0.05,0.07,12),-5.97,1.05,0);
 put(box(12,0.14,0.09),0,6.86,-5.95);
 put(box(0.09,0.14,12),-5.95,6.86,0);
@@ -180,6 +211,7 @@ const steamG=new THREE.Group(); put(steamG,0,0.34,0,0,0,0,mugG);
 for(let j=0;j<3;j++){
   const m=new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:0.8});
   steamMats.push(m);
+  TINT.push(m);   // 登记进「额外线条材质」，才会跟着日夜换色 + 跟着灯锥裁剪
   const l=new THREE.Line(geo([[0,0,0],[0,0.1,0]]),m);
   l.position.x=(j-1)*0.09; l.userData.noBold=true; steamG.add(l); steamLines.push(l);
 }
@@ -486,6 +518,247 @@ mkItem(proxy(1.2,1.2,1.2,1.2,0.4,2.6),{rate:0.6,bold:ballG,
       if(it.p>=1){it.p=0;it.target=0;ballG.position.y=BALLR;}
     }}});
 
+/* ================================================================
+   院子 —— 门外那一片中式小院
+   和房间用完全同一套原语（edge/box/line/loop/circleXX）搭，所以院子的每一根线
+   自动获得三件事：白填充遮挡家具、夜晚配色反相、灯锥裁剪 —— 一行额外处理都不用。
+   ================================================================ */
+const YX0=-6.24,YX1=6.24,YZ0=-14.60,YZ1=-6.24;
+const YW=YX1-YX0,YD=YZ1-YZ0,YCZ=(YZ0+YZ1)/2;
+const WALL_H=2.35,WALL_T=0.24,YWZ=YZ0+WALL_T/2;
+
+/* --- 地面 + 石板缝 + 散水 --- */
+put(new THREE.Mesh(new THREE.PlaneGeometry(YW,YD),FILL),0,-0.006,YCZ,-Math.PI/2,0,0);
+put(loop([[YX0,0.008,YZ0],[YX1,0.008,YZ0],[YX1,0.008,YZ1],[YX0,0.008,YZ1]]),0,0,0);
+for(let x=YX0+1.2;x<YX1-0.01;x+=1.2) put(line([[x,0.009,YZ0],[x,0.009,YZ1]]),0,0,0);
+for(let z=YZ0+1.2;z<YZ1-0.01;z+=1.2) put(line([[YX0,0.009,z],[YX1,0.009,z]]),0,0,0);
+put(loop([[YX0+0.55,0.010,YZ0+0.55],[YX1-0.55,0.010,YZ0+0.55],[YX1-0.55,0.010,YZ1-0.55],[YX0+0.55,0.010,YZ1-0.55]]),0,0,0);
+
+/* --- 院墙：左右两道 + 远墙（远墙留门洞） + 瓦檐压顶 --- */
+put(box(WALL_T,WALL_H,YD),YX0+WALL_T/2,WALL_H/2,YCZ);
+put(box(WALL_T,WALL_H,YD),YX1-WALL_T/2,WALL_H/2,YCZ);
+const GATE_X0=-5.20,GATE_X1=-3.30,GATE_H=2.17;
+put(box(GATE_X0-YX0,WALL_H,WALL_T),(YX0+GATE_X0)/2,WALL_H/2,YWZ);
+put(box(YX1-GATE_X1,WALL_H,WALL_T),(GATE_X1+YX1)/2,WALL_H/2,YWZ);
+put(box(GATE_X1-GATE_X0,WALL_H-GATE_H,WALL_T),(GATE_X0+GATE_X1)/2,(GATE_H+WALL_H)/2,YWZ);
+const CAP_H=0.14,CAP_W=WALL_T+0.16,CAP_Y=WALL_H+CAP_H/2;
+put(box(CAP_W,CAP_H,YD),YX0+WALL_T/2,CAP_Y,YCZ);
+put(box(CAP_W,CAP_H,YD),YX1-WALL_T/2,CAP_Y,YCZ);
+put(box(YW,CAP_H,CAP_W),0,CAP_Y,YWZ);
+put(box(0.05,0.05,YD),YX0+WALL_T/2,CAP_Y+0.095,YCZ);
+put(box(0.05,0.05,YD),YX1-WALL_T/2,CAP_Y+0.095,YCZ);
+put(box(YW,0.05,0.05),0,CAP_Y+0.095,YWZ);
+
+/* --- 门廊：两根柱子 + 横梁 + 回墙短梁 + 微倾屋面 --- */
+const PX0=-5.90,PX1=-2.60,PZ=-7.45,PH=3.50,PCX=(PX0+PX1)/2;
+put(box(0.17,PH,0.17),-5.62,PH/2,PZ);
+put(box(0.17,PH,0.17),-2.88,PH/2,PZ);
+put(box(PX1-PX0+0.34,0.20,0.18),PCX,PH+0.10,PZ);
+put(box(0.14,0.14,1.21),-5.62,PH+0.10,-6.845);
+put(box(0.14,0.14,1.21),-2.88,PH+0.10,-6.845);
+put(box(PX1-PX0+0.6,0.10,2.0),PCX,PH+0.30,-6.85,-0.10,0,0);
+put(box(PX1-PX0+0.6,0.05,0.06),PCX,PH+0.19,-7.83,-0.10,0,0);
+put(rectXY(1.9,0.9),-4.25,0.012,-6.60,-Math.PI/2,0,0);
+
+/* --- 装饰：竹、石、草丛 --- */
+function bamboo(x,z,h){
+  put(box(0.07,h,0.07),x,h/2,z);
+  for(let k=0;k<5;k++){
+    const a=k*1.7,yy=h*(0.62+k*0.075);
+    put(line([[x,yy,z],[x+Math.cos(a)*0.34,yy+0.15,z+Math.sin(a)*0.34]]),0,0,0);
+  }
+}
+function rock(x,z,r){put(edge(new THREE.SphereGeometry(r,8,6)),x,r*0.58,z);}
+function grass(x,z,n){
+  for(let k=0;k<n;k++){
+    const a=k*2.4,rr=0.05+k*0.035;
+    put(line([[x+Math.cos(a)*rr,0,z+Math.sin(a)*rr],[x+Math.cos(a)*rr*2.0,0.28+((k*5)%3)*0.07,z+Math.sin(a)*rr*2.0]]),0,0,0);
+  }
+}
+bamboo(-5.60,-13.30,2.5);bamboo(-5.20,-13.55,2.9);bamboo(5.55,-13.40,2.6);bamboo(5.15,-13.70,2.3);
+rock(-2.90,-13.30,0.42);rock(-2.35,-13.05,0.27);rock(-3.45,-13.62,0.33);
+rock(3.10,-6.80,0.36);rock(2.45,-6.55,0.22);rock(2.75,-7.35,0.28);
+grass(-4.60,-6.90,6);grass(-3.60,-6.70,5);grass(4.30,-13.30,7);grass(-1.70,-13.20,6);
+grass(5.40,-6.60,5);grass(0.60,-13.55,5);grass(-5.55,-6.75,4);
+
+/* --- 院子里的八件可交互物件 --- */
+
+/* 1. 灯笼（挂门廊横梁下） */
+const lanternG=new THREE.Group(); put(lanternG,-4.25,2.50,-7.45);
+put(line([[0,1.00,0],[0,0.34,0]]),0,0,0,0,0,0,lanternG);
+put(box(0.26,0.06,0.26),0,0.32,0,0,0,0,lanternG);
+const lanternBody=put(edge(new THREE.SphereGeometry(0.24,14,10)),0,0,0,0,0,0,lanternG);
+lanternBody.scale.y=0.82;
+put(box(0.20,0.05,0.20),0,-0.24,0,0,0,0,lanternG);
+put(line([[0,-0.26,0],[0,-0.56,0]]),0,0,0,0,0,0,lanternG);
+const lanternRays=new THREE.Group(); put(lanternRays,0,0,0,0,0,0,lanternG); lanternRays.visible=false;
+for(let k=0;k<6;k++){const a=k*Math.PI/3;
+  put(line([[Math.cos(a)*0.32,Math.sin(a)*0.30,0],[Math.cos(a)*0.60,Math.sin(a)*0.56,0]]),0,0,0,0,0,0,lanternRays);}
+const lanternIt=mkItem(proxy(0.9,0.9,0.9,-4.25,2.50,-7.45),{rate:1.8,bold:lanternG,
+  action:it=>{it.target=it.target?0:1;RoomAudio.sfx('lantern');},
+  apply:it=>{const e=E(it.p);lanternRays.visible=it.p>0.5;
+    lanternBody.scale.set(1,0.82,1).multiplyScalar(1+0.06*Math.sin(e*Math.PI));
+    lanternG.position.y=2.50+0.02*e;}});
+
+/* 2. 老树（摇树 → 树冠摆动 + 落叶） */
+const treeG=new THREE.Group(); put(treeG,3.62,0,-11.90);
+put(box(0.36,2.6,0.36),0,1.30,0,0,0,0,treeG);
+put(box(0.30,0.46,0.30),0,0.23,0,0,0.42,0,treeG);
+put(box(0.15,0.15,1.35),-0.625,2.55,0.25,0,-1.19,0,treeG);
+const treeCrown=new THREE.Group(); put(treeCrown,0,2.90,0,0,0,0,treeG);
+put(edge(new THREE.SphereGeometry(0.95,12,9)),0,0.50,0,0,0,0,treeCrown);
+put(edge(new THREE.SphereGeometry(0.72,12,9)),0.85,0.15,0.25,0,0,0,treeCrown);
+put(edge(new THREE.SphereGeometry(0.66,12,9)),-0.80,0.20,-0.30,0,0,0,treeCrown);
+const leafFall=[];
+for(let k=0;k<7;k++){
+  const l=put(line([[0,0,0],[0.13,-0.07,0.03]]),0,0,0,0,0,0,treeG); l.visible=false;
+  leafFall.push({o:l,x0:(k%3-1)*0.85,z0:(k%2?0.7:-0.6),y0:3.5+(k%4)*0.22,ph:k/7,sw:0.6+(k%3)*0.4});
+}
+mkItem(proxy(2.6,4.8,2.6,3.62,2.35,-11.90),{rate:1.5,bold:treeG,
+  action:it=>{it.target=1;RoomAudio.sfx('leaves');},
+  apply:(it,dt,t)=>{
+    const e=E(it.p);
+    treeCrown.rotation.z=0.14*Math.sin(t*2.2)*e;
+    treeCrown.rotation.x=0.08*Math.cos(t*1.8)*e;
+    leafFall.forEach((f,k)=>{
+      const u=(it.p-f.ph+1)%1;
+      f.o.visible=it.p>f.ph&&u<0.97;
+      if(!f.o.visible)return;
+      f.o.position.set(f.x0+Math.sin(u*f.sw*6.2+k)*0.55,f.y0-u*3.4,f.z0+Math.cos(u*f.sw*5.1+k)*0.42);
+      f.o.rotation.set(u*4+k,0,u*7+k);
+    });
+    if(it.p>=1){it.p=0;it.target=0;leafFall.forEach(f=>{f.o.visible=false;});}
+  }});
+
+/* 3. 秋千（挂在树枝下，可以反复推、幅度叠加后自然衰减） */
+const swingG=new THREE.Group(); put(swingG,2.37,2.55,-11.40);
+const swingArm=new THREE.Group(); swingG.add(swingArm);
+put(line([[-0.36,0,0],[-0.36,-1.45,0]]),0,0,0,0,0,0,swingArm);
+put(line([[0.36,0,0],[0.36,-1.45,0]]),0,0,0,0,0,0,swingArm);
+put(box(0.80,0.07,0.34),0,-1.46,0,0,0,0,swingArm);
+const swingProxy=proxy(1.3,1.9,1.2,2.37,1.80,-11.40);
+let swingAmp=0,swingPh=0;
+mkItem(swingProxy,{rate:1,bold:swingG,
+  action:it=>{swingAmp=Math.min(1.10,swingAmp+0.55);RoomAudio.sfx('swing');},
+  apply:(it,dt,t)=>{swingAmp=Math.max(0,swingAmp-dt*0.26);swingPh+=dt*2.7;swingArm.rotation.x=swingAmp*Math.sin(swingPh);}});
+
+/* 4. 水缸（点击 → 水面荡开三圈涟漪） */
+const vatG=new THREE.Group(); put(vatG,-5.35,0,-9.20);
+put(edge(new THREE.CylinderGeometry(0.56,0.42,0.88,16)),0,0.44,0,0,0,0,vatG);
+put(edge(new THREE.CylinderGeometry(0.60,0.60,0.07,16)),0,0.88,0,0,0,0,vatG);
+put(fillCircle(0.53,20),0,0.885,0,-Math.PI/2,0,0,vatG);
+put(circleXZ(0.53,20),0,0.90,0,0,0,0,vatG);
+const vatRipples=[];
+for(let k=0;k<3;k++){const r=put(circleXZ(0.10,20),0,0.905,0,0,0,0,vatG);r.visible=false;vatRipples.push(r);}
+let vatRip=0;
+mkItem(proxy(1.4,1.1,1.4,-5.35,0.55,-9.20),{rate:1.4,bold:vatG,
+  action:it=>{it.target=1;vatRip=0;RoomAudio.sfx('water');},
+  apply:(it,dt,t)=>{
+    if(it.target<1)return;
+    vatRip+=dt;
+    vatRipples.forEach((r,k)=>{
+      const u=(vatRip+k*0.34)%1.22;
+      r.visible=u<1.0;
+      r.scale.setScalar(0.30+u*5.4);
+    });
+    if(vatRip>1.75){it.p=0;it.target=0;vatRipples.forEach(r=>{r.visible=false;});}
+  }});
+
+/* 5. 石桌茶台（倒茶 → 茶壶倾倒 + 一道水线 + 两杯热气） */
+const tableG=new THREE.Group(); put(tableG,-1.40,0,-10.60);
+put(edge(new THREE.CylinderGeometry(0.66,0.66,0.10,16)),0,0.74,0,0,0,0,tableG);
+put(edge(new THREE.CylinderGeometry(0.19,0.25,0.72,12)),0,0.36,0,0,0,0,tableG);
+put(edge(new THREE.CylinderGeometry(0.46,0.46,0.08,14)),0,0.04,0,0,0,0,tableG);
+put(edge(new THREE.CylinderGeometry(0.22,0.24,0.42,12)),-0.10,0.21,-1.38,0,0,0,tableG);
+put(edge(new THREE.CylinderGeometry(0.22,0.24,0.42,12)),1.34,0.21,0.62,0,0,0,tableG);
+const cups=[[0.24,0.12],[-0.16,0.32]];
+cups.forEach(c=>put(edge(new THREE.CylinderGeometry(0.055,0.045,0.09,10)),c[0],0.835,c[1],0,0,0,tableG));
+const potPivot=new THREE.Group(); put(potPivot,-0.06,0.87,-0.12,0,0,0,tableG);
+put(edge(new THREE.CylinderGeometry(0.11,0.12,0.16,12)),0,0,0,0,0,0,potPivot);
+put(line([[0.09,0.02,0],[-0.02,0.20,0],[0.03,0.02,0]]),0,0,0,0,0,0,potPivot);
+put(line([[0.10,0.01,0],[0.29,0.05,0]]),0,0,0,0,0,0,potPivot);
+const pourLine=put(line([[0.24,0.90,-0.12],[0.24,0.84,0.12]]),0,0,0,0,0,0,tableG);
+pourLine.visible=false;
+const teaSteam=[];
+cups.forEach(c=>{
+  const m=new THREE.LineBasicMaterial({color:0x000000,transparent:true,opacity:0});
+  TINT.push(m);
+  const l=new THREE.Line(geo([[0,0,0],[0,0.1,0]]),m); l.userData.noBold=true;
+  put(l,c[0],0.89,c[1],0,0,0,tableG);
+  teaSteam.push({l,m});
+});
+mkItem(proxy(1.7,1.0,1.7,-1.40,0.60,-10.60),{rate:1.3,bold:tableG,
+  action:it=>{it.target=it.target?0:1;RoomAudio.sfx('teapot');},
+  apply:(it,dt,t)=>{
+    potPivot.rotation.z=-0.95*E(it.p);
+    pourLine.visible=it.p>0.35&&it.p<0.92;
+    teaSteam.forEach((s,k)=>{
+      s.m.opacity=0.75*it.p;
+      const a=[];
+      for(let j=0;j<=5;j++) a.push(V(Math.sin(t*3.1+k*1.7+j*0.8)*0.035*(0.3+j/5),j*0.062,0));
+      s.l.geometry.setFromPoints(a);
+    });
+  }});
+
+/* 6. 花坛（花开 → 五朵依次绽放并轻摆） */
+const bedG=new THREE.Group(); put(bedG,5.30,0,-8.10);
+put(box(1.40,0.34,3.00),0,0.17,0,0,0,0,bedG);
+put(loop([[0.62,0.355,-1.42],[0.62,0.355,1.42],[-0.62,0.355,1.42],[-0.62,0.355,-1.42]]),0,0,0,0,0,0,bedG);
+const blooms=[];
+[-1.05,-0.55,-0.05,0.45,0.95].forEach((fz,k)=>{
+  const fx=k%2?0.26:-0.24;
+  const stem=new THREE.Group(); put(stem,fx,0.34,fz,0,0,0,bedG);
+  const curve=new THREE.QuadraticBezierCurve3(V(0,0,0),V(fx*0.15,0.34,0),V(fx*0.30,0.64,0));
+  stem.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(7)),MAT));
+  const b=new THREE.Group(); put(b,fx*0.30,0.64,0,0,0,0,stem);
+  for(let p=0;p<5;p++){const a=p*Math.PI*2/5;
+    put(circleXY(0.055,10),Math.cos(a)*0.085,Math.sin(a)*0.085,0,0,0,0,b);}
+  put(circleXY(0.042,10),0,0,0.004,0,0,0,b);
+  b.scale.setScalar(0.0001);
+  blooms.push(b);
+});
+mkItem(proxy(1.6,0.7,3.1,5.30,0.35,-8.10),{rate:1.2,bold:bedG,
+  action:it=>{it.target=it.target?0:1;RoomAudio.sfx('bloom');},
+  apply:(it,dt,t)=>{
+    blooms.forEach((b,k)=>{
+      const u=Math.min(1,Math.max(0,(it.p-k*0.14)/0.42));
+      b.scale.setScalar(Math.max(0.0001,u));
+      b.rotation.z=0.10*Math.sin(t*1.6+k)*it.p;
+    });
+  }});
+
+/* 7. 晾衣绳（起风 → 三件衣服摆动；绳高 2.62、衣摆 1.87，小线不用绕路） */
+const lineG=new THREE.Group(); put(lineG,0,0,-12.60);
+put(box(0.10,2.62,0.10),-5.80,1.31,0,0,0,0,lineG);
+put(box(0.10,2.62,0.10),-3.80,1.31,0,0,0,0,lineG);
+const ropePts=[];
+for(let k=0;k<=8;k++){const u=k/8;ropePts.push([-5.80+2.00*u,2.62-0.22*Math.sin(u*Math.PI),0]);}
+put(line(ropePts),0,0,0,0,0,0,lineG);
+const cloths=[];
+[-5.35,-4.80,-4.25].forEach((cx,k)=>{
+  const g=new THREE.Group();
+  put(g,cx,2.62-0.22*Math.sin((cx+5.80)/2.00*Math.PI),0,0,0,0,lineG);
+  put(rectXY(0.42,0.50),0,-0.28,0,0,0,0,g);
+  put(line([[-0.21,-0.06,0],[0.21,-0.06,0]]),0,0,0,0,0,0,g);
+  cloths.push(g);
+});
+mkItem(proxy(2.3,1.0,0.6,-4.80,2.15,-12.60),{rate:1.5,bold:lineG,
+  action:it=>{it.target=it.target?0:1;RoomAudio.sfx('cloth');},
+  apply:(it,dt,t)=>{cloths.forEach((c,k)=>{c.rotation.x=0.32*Math.sin(t*1.9+k*0.8)*it.p;});}});
+
+/* 8. 院门（两扇向外推开） */
+const gateL=new THREE.Group(); put(gateL,GATE_X0,0,YWZ);
+put(box(0.95,2.05,0.07),0.475,1.025,0,0,0,0,gateL);
+put(rectXY(0.6,1.2),0.475,1.35,0.05,0,0,0,gateL);
+put(rectXY(0.6,0.5),0.475,0.45,0.05,0,0,0,gateL);
+const gateR=new THREE.Group(); put(gateR,GATE_X1,0,YWZ);
+put(box(0.95,2.05,0.07),-0.475,1.025,0,0,0,0,gateR);
+put(rectXY(0.6,1.2),-0.475,1.35,0.05,0,0,0,gateR);
+put(rectXY(0.6,0.5),-0.475,0.45,0.05,0,0,0,gateR);
+mkItem(proxy(2.3,2.4,0.9,(GATE_X0+GATE_X1)/2,1.15,YWZ),{rate:1.2,bold:[gateL,gateR],
+  action:it=>{it.target=it.target?0:1;RoomAudio.sfx('gate');},
+  apply:it=>{const e=E(it.p);gateL.rotation.y=1.55*e;gateR.rotation.y=-1.55*e;}});
+
 /* ---------------- hover bold (fat lines) ---------------- */
 let BOLDMAT=null;
 let BOLDMAT_OUT=null;
@@ -554,9 +827,41 @@ function setHover(it){
   if(hovered)hovered.boldClones.forEach(b=>{b.visible=true;});
   document.body.style.cursor=it?'pointer':'';
 }
-window.addEventListener('pointerdown',()=>{RoomAudio.unlock();});
-window.addEventListener('pointerdown',e=>{if(isUI(e))return;const it=pick(e);if(it&&it.action)it.action(it);});
-window.addEventListener('pointermove',e=>{if(isUI(e)){setHover(null);return;}setHover(pick(e));});
+/* 拖动 = 转视角，点击 = 用物件。靠位移阈值（4px）区分，所以按下去不动还是原来的「点击」。 */
+let drag=null;
+window.addEventListener('pointerdown',e=>{
+  RoomAudio.unlock();
+  if(isUI(e))return;
+  drag={x:e.clientX,y:e.clientY,moved:false,az:view.az,pol:view.pol};
+  if(renderer.domElement.setPointerCapture){try{renderer.domElement.setPointerCapture(e.pointerId);}catch(err){}}
+});
+window.addEventListener('pointermove',e=>{
+  if(drag){
+    if(!drag.moved&&Math.hypot(e.clientX-drag.x,e.clientY-drag.y)>4)drag.moved=true;
+    if(drag.moved){
+      viewGoal=null;                 // 用户一拖就接管，取消正在进行的区域缓动
+      view.az=drag.az-(e.clientX-drag.x)*0.0083;
+      view.pol=Math.max(0.10,Math.min(1.42,drag.pol+(e.clientY-drag.y)*0.0060));
+      document.body.style.cursor='grabbing';
+      return;
+    }
+  }
+  if(isUI(e)){setHover(null);return;}
+  setHover(pick(e));
+});
+window.addEventListener('pointerup',e=>{
+  if(!drag)return;
+  const moved=drag.moved;
+  drag=null;
+  document.body.style.cursor='';
+  if(!moved&&!isUI(e)){const it=pick(e);if(it&&it.action)it.action(it);}
+  setHover(pick(e));
+});
+window.addEventListener('pointercancel',()=>{drag=null;document.body.style.cursor='';});
+window.addEventListener('wheel',e=>{
+  if(isUI(e))return;
+  view.r=Math.max(6,Math.min(40,view.r+e.deltaY*0.012));
+},{passive:true});
 window.addEventListener('pointerleave',()=>{setHover(null);});
 window.addEventListener('resize',()=>{
   camera.aspect=window.innerWidth/window.innerHeight;
@@ -594,22 +899,48 @@ const DEV={
   fan:{label:'吊扇',it:byBold(fanRoot),kind:'toggle',mode:'tv'},
   mobile:{label:'风铃',it:byBold(mobG),kind:'toggle',mode:'tv'},
   plant:{label:'盆栽',it:byBold(plantG),kind:'toggle'},
-  ball:{label:'球',it:byBold(ballG),kind:'pulse'}
+  ball:{label:'球',it:byBold(ballG),kind:'pulse'},
+
+  /* 院子里的 8 件 */
+  lantern:{label:'灯笼',it:byBold(lanternG),kind:'toggle'},
+  tree:{label:'老树',it:byBold(treeG),kind:'pulse'},
+  swing:{label:'秋千',it:byBold(swingG),kind:'pulse'},
+  vat:{label:'水缸',it:byBold(vatG),kind:'pulse'},
+  stoneTable:{label:'石桌茶台',it:byBold(tableG),kind:'toggle'},
+  flowerBed:{label:'花坛',it:byBold(bedG),kind:'toggle'},
+  clothesline:{label:'晾衣绳',it:byBold(lineG),kind:'toggle'},
+  gate:{label:'院门',it:byBold(gateL),kind:'toggle'},
+
+  /* 两个「区域」伪设备：没有实体，只用来指路。Room.exec 见 it 为空直接跳过。 */
+  yard:{label:'院子',it:null,kind:'zone'},
+  room:{label:'屋里',it:null,kind:'zone'}
 };
 function devOn(d){return !d||!d.it?0:(d.mode==='tv'?(d.it.tv>0?1:0):(d.it.target?1:0));}
 
-/* --- 每件东西前面「该站在哪」 --- */
+/* --- 每件东西前面「该站在哪」。门的落点跟当前在屋/在院有关，所以只有它是函数。 --- */
+function inYard(){return man.z<YZ1;}
 const STAND={
-  door:[-4.2,-4.8],window:[-4.2,-0.5],blinds:[-4.2,-0.5],drawer:[-4.2,0.55],
+  door:()=>inYard()?[-4.25,-7.30]:[-4.20,-4.80],
+  window:[-4.2,-0.5],blinds:[-4.2,-0.5],drawer:[-4.2,0.55],
   lamp:[-4.2,-1.65],mug:[-4.2,0.8],chair:[-3.7,0.95],cabinet:[4.25,-3.85],
   book:[4.25,-3.85],clock:[-0.8,-3.6],lightSwitch:[-3.05,-4.55],sofa:[-0.4,-3.4],
   record:[-4.35,3.9],picture:[-4.35,3.9],globe:[4.0,-3.0],fan:[0,0],
-  mobile:[-4.6,2.6],plant:[3.7,3.4],ball:[1.2,1.8]
+  mobile:[-4.6,2.6],plant:[3.7,3.4],ball:[1.2,1.8],
+
+  lantern:[-4.25,-8.20],tree:[3.62,-10.70],swing:[2.37,-10.20],vat:[-4.20,-9.20],
+  stoneTable:[-1.40,-9.30],flowerBed:[4.10,-8.10],clothesline:[-4.80,-11.80],
+  gate:[-4.25,-13.40],yard:[-0.30,-12.00],room:[0,1.2]
 };
+function standOf(name){
+  const s=STAND[name];
+  return typeof s==='function'?s():(s||null);
+}
 const NICE={door:'门口',window:'窗边',blinds:'窗边',drawer:'书桌前',lamp:'台灯旁边',mug:'书桌旁',
   chair:'椅子边',cabinet:'书柜前',book:'书柜前',clock:'挂钟下面',lightSwitch:'开关下面',
   sofa:'沙发边',record:'唱机旁边',picture:'画下面',globe:'地球仪旁边',fan:'吊扇正下方',
-  mobile:'风铃下面',plant:'盆栽旁边',ball:'球的旁边'};
+  mobile:'风铃下面',plant:'盆栽旁边',ball:'球的旁边',
+  lantern:'灯笼下',tree:'老树边',swing:'秋千边',vat:'水缸边',stoneTable:'茶台旁',
+  flowerBed:'花坛边',clothesline:'晾衣绳下',gate:'院门口',yard:'院子里',room:'屋子中间'};
 
 /* --- 家具的占位盒子，从当前场景坐标推出来，椅子被拖开了也能跟上 --- */
 function obstacles(){
@@ -624,35 +955,62 @@ function obstacles(){
   add(4.15,2.85,5.10,3.95);                            // 盆栽
   add(4.55,-3.45,5.45,-2.55);                          // 地球仪
   add(0.85,2.25,1.55,2.95);                            // 球
+
+  /* 后墙：门洞两侧是实墙；门关着时门洞也封上 —— 这就是「必须门开着才能进院子」 */
+  add(-6.30,-6.30,-5.18,-5.94);
+  add(-3.32,-6.30, 6.30,-5.94);
+  if(!devOn(DEV.door)) add(-5.18,-6.30,-3.32,-5.94);
+  else add(-5.86,-5.98,-5.15,-4.35);                   // 门扇往屋里敞着，别从门扇里穿过去
+
+  /* 院子 */
+  add(-6.30,-14.70,-6.00,-6.24);                       // 左院墙
+  add( 6.00,-14.70, 6.30,-6.24);                       // 右院墙
+  add(-6.30,-14.70,-5.20,-14.36);                      // 远墙门洞左侧
+  add(-3.30,-14.70, 6.30,-14.36);                      // 远墙门洞右侧
+  if(!devOn(DEV.gate)) add(-5.20,-14.70,-3.30,-14.36); // 院门关着
+  add(-5.72,-7.55,-5.53,-7.36);                        // 门廊柱
+  add(-2.97,-7.55,-2.79,-7.36);
+  add(3.44,-12.08,3.80,-11.72);                        // 老树干
+  add(1.97,-11.57,2.77,-11.23);                        // 秋千板
+  add(-5.95,-9.80,-4.75,-8.60);                        // 水缸
+  add(-2.06,-11.26,-0.74,-9.94);                       // 石桌
+  add(-1.72,-12.20,-1.28,-11.76);                      // 石凳 ×2
+  add(-0.30,-10.22, 0.18,-9.74);
+  add(4.60,-9.60,6.00,-6.60);                          // 花坛
+  add(-3.85,-12.65,-3.75,-12.55);                      // 晾衣绳立柱（绳在 2.62 高，不用绕）
   return out;
 }
 
-/* --- 0.25m 的占据网格 + A*，房间大小只有 46×46，每次寻路重算都绰绰有余 --- */
-const CELL=0.25,GRID_MIN=-5.7,GRID_N=46,GRID_LIM=GRID_MIN+(GRID_N-1)*CELL;
-const grid=new Uint8Array(GRID_N*GRID_N);
+/* --- 0.25m 的占据网格 + A*。加了院子之后房间不再是正方形，网格改成矩形：
+       x 方向 47 格（覆盖 -5.75~5.75），z 方向 81 格（覆盖 -14.30~5.70）。
+       3807 格，每次寻路重算依然绰绰有余。 --- */
+const CELL=0.25,GRID_X0=-5.75,GNX=47,GRID_Z0=-14.30,GNZ=81;
+const GRID_X1=GRID_X0+(GNX-1)*CELL,GRID_Z1=GRID_Z0+(GNZ-1)*CELL;
+const grid=new Uint8Array(GNX*GNZ);
+const GIDX=(i,j)=>i*GNZ+j;
 let OBS=[];
 function buildGrid(){
   OBS=obstacles();
-  for(let i=0;i<GRID_N;i++)for(let j=0;j<GRID_N;j++){
-    const x=GRID_MIN+i*CELL,z=GRID_MIN+j*CELL;
-    let ok=x>GRID_MIN+MAN_R&&x<GRID_LIM-MAN_R&&z>GRID_MIN+MAN_R&&z<GRID_LIM-MAN_R;
+  for(let i=0;i<GNX;i++)for(let j=0;j<GNZ;j++){
+    const x=GRID_X0+i*CELL,z=GRID_Z0+j*CELL;
+    let ok=x>GRID_X0+MAN_R&&x<GRID_X1-MAN_R&&z>GRID_Z0+MAN_R&&z<GRID_Z1-MAN_R;
     if(ok)for(const b of OBS){if(x>b[0]-MAN_R&&x<b[2]+MAN_R&&z>b[1]-MAN_R&&z<b[3]+MAN_R){ok=false;break;}}
-    grid[i*GRID_N+j]=ok?1:0;
+    grid[GIDX(i,j)]=ok?1:0;
   }
 }
 function freeAt(x,z){
-  const i=Math.round((x-GRID_MIN)/CELL),j=Math.round((z-GRID_MIN)/CELL);
-  return i<0||j<0||i>=GRID_N||j>=GRID_N?false:grid[i*GRID_N+j]===1;
+  const i=Math.round((x-GRID_X0)/CELL),j=Math.round((z-GRID_Z0)/CELL);
+  return i<0||j<0||i>=GNX||j>=GNZ?false:grid[GIDX(i,j)]===1;
 }
 function nearestFree(x,z){
-  let i=Math.max(0,Math.min(GRID_N-1,Math.round((x-GRID_MIN)/CELL)));
-  let j=Math.max(0,Math.min(GRID_N-1,Math.round((z-GRID_MIN)/CELL)));
-  if(grid[i*GRID_N+j])return [GRID_MIN+i*CELL,GRID_MIN+j*CELL];
-  for(let r=1;r<14;r++)for(let a=-r;a<=r;a++)for(let b=-r;b<=r;b++){
+  let i=Math.max(0,Math.min(GNX-1,Math.round((x-GRID_X0)/CELL)));
+  let j=Math.max(0,Math.min(GNZ-1,Math.round((z-GRID_Z0)/CELL)));
+  if(grid[GIDX(i,j)])return [GRID_X0+i*CELL,GRID_Z0+j*CELL];
+  for(let r=1;r<20;r++)for(let a=-r;a<=r;a++)for(let b=-r;b<=r;b++){
     if(Math.max(Math.abs(a),Math.abs(b))!==r)continue;
     const ii=i+a,jj=j+b;
-    if(ii<0||jj<0||ii>=GRID_N||jj>=GRID_N)continue;
-    if(grid[ii*GRID_N+jj])return [GRID_MIN+ii*CELL,GRID_MIN+jj*CELL];
+    if(ii<0||jj<0||ii>=GNX||jj>=GNZ)continue;
+    if(grid[GIDX(ii,jj)])return [GRID_X0+ii*CELL,GRID_Z0+jj*CELL];
   }
   return null;
 }
@@ -665,9 +1023,9 @@ function findPath(sx,sz,tx,tz){
   buildGrid();
   const s=nearestFree(sx,sz),t=nearestFree(tx,tz);
   if(!s||!t)return [];
-  const si=Math.round((s[0]-GRID_MIN)/CELL),sj=Math.round((s[1]-GRID_MIN)/CELL);
-  const ti=Math.round((t[0]-GRID_MIN)/CELL),tj=Math.round((t[1]-GRID_MIN)/CELL);
-  const N=GRID_N*GRID_N,idx=(i,j)=>i*GRID_N+j;
+  const si=Math.round((s[0]-GRID_X0)/CELL),sj=Math.round((s[1]-GRID_Z0)/CELL);
+  const ti=Math.round((t[0]-GRID_X0)/CELL),tj=Math.round((t[1]-GRID_Z0)/CELL);
+  const N=GNX*GNZ,idx=GIDX;
   const g=new Float32Array(N).fill(Infinity),f=new Float32Array(N).fill(Infinity);
   const from=new Int32Array(N).fill(-1),closed=new Uint8Array(N);
   const h=(i,j)=>Math.hypot(i-ti,j-tj);
@@ -679,11 +1037,11 @@ function findPath(sx,sz,tx,tz){
     if(cur===goal)break;
     if(closed[cur])continue;
     closed[cur]=1;
-    const ci=Math.floor(cur/GRID_N),cj=cur%GRID_N;
+    const ci=Math.floor(cur/GNZ),cj=cur%GNZ;
     for(let a=-1;a<=1;a++)for(let b=-1;b<=1;b++){
       if(!a&&!b)continue;
       const ni=ci+a,nj=cj+b;
-      if(ni<0||nj<0||ni>=GRID_N||nj>=GRID_N)continue;
+      if(ni<0||nj<0||ni>=GNX||nj>=GNZ)continue;
       const nk=idx(ni,nj);
       if(!grid[nk]||closed[nk])continue;
       if(a&&b&&(!grid[idx(ci+a,cj)]||!grid[idx(ci,cj+b)]))continue; // 不许贴着家具角穿过去
@@ -695,7 +1053,7 @@ function findPath(sx,sz,tx,tz){
   const cells=[];let c=goal;
   while(c!==-1&&cells.length<=N){cells.push(c);c=from[c];}
   cells.reverse();
-  const pts=cells.map(k=>[GRID_MIN+Math.floor(k/GRID_N)*CELL,GRID_MIN+(k%GRID_N)*CELL]);
+  const pts=cells.map(k=>[GRID_X0+Math.floor(k/GNZ)*CELL,GRID_Z0+(k%GNZ)*CELL]);
   pts[0]=[s[0],s[1]];pts[pts.length-1]=[t[0],t[1]];
   const out=[];let i=0;
   while(i<pts.length-1){          // 拉直：能直视就直接跳过中间点
@@ -742,11 +1100,47 @@ let emote=null,emoteT=0;
 function angDelta(a,b){return ((b-a+Math.PI)%(Math.PI*2)+Math.PI*2)%(Math.PI*2)-Math.PI;}
 function startEmote(kind){emote=kind;emoteT=0.9;}
 
+/* --- 相机：小线换了区域就缓动到那套预设。阈值带迟滞，免得他站在门槛上镜头来回抖。 --- */
+function stepCamera(dt){
+  if(viewGoal===null){
+    const inY=viewZone==='yard'?man.z<-5.9:man.z<-6.3;
+    const want=inY?'yard':'room';
+    if(want!==viewZone){viewZone=want;viewGoal=PRESET[want];}
+  }
+  if(viewGoal){
+    const k=Math.min(1,dt*1.7),gd=angDelta(view.az,viewGoal.az);
+    view.az+=gd*k;
+    view.pol+=(viewGoal.pol-view.pol)*k;
+    view.r+=(viewGoal.r-view.r)*k;
+    for(let i=0;i<3;i++)view.t[i]+=(viewGoal.t[i]-view.t[i])*k;
+    if(Math.abs(gd)<0.008&&Math.abs(view.pol-viewGoal.pol)<0.008&&Math.abs(view.r-viewGoal.r)<0.06){
+      view.az=viewGoal.az;view.pol=viewGoal.pol;view.r=viewGoal.r;
+      view.t=viewGoal.t.slice();viewGoal=null;
+    }
+  }
+  applyCamera();
+}
+
+/* 目标在「另一个区域」而门关着 —— 先把「走去开门」插到队列最前面。
+   于是「去院子里点灯笼」实际会走成：走到门口 → 开门（有声音）→ 穿过门洞 → 到灯笼下 → 点亮。
+   「进院子必须门开着」这条规则于是变成用户看得见的一串动作，而不只是一条隐形限制。 */
+function planRoute(name){
+  const q=[],goal=standOf(name);
+  if(!goal)return q;
+  if((goal[1]<YZ1)!==inYard()&&!devOn(DEV.door)){
+    q.push({t:'go',p:standOf('door'),name:'door'});
+    q.push({t:'exec',name:'door',op:'on'});
+  }
+  q.push({t:'go',p:goal,name:name});
+  return q;
+}
+
 const Agent={
   go(target){
     let p=null,name=null;
     if(Array.isArray(target))p=target;
-    else if(STAND[target]){p=STAND[target];name=target;}
+    else if(standOf(target)){p=standOf(target);name=target;}
+    else if(inYard())p=[-5.2+Math.random()*10.0,-14.0+Math.random()*6.6];
     else p=[(Math.random()-0.5)*9,(Math.random()-0.5)*9];
     path.length=0;
     path.push(...findPath(man.x,man.z,p[0],p[1]));
@@ -755,7 +1149,7 @@ const Agent={
   use(name,op){
     if(!DEV[name])return;
     queue.length=0;path.length=0;
-    if(STAND[name])queue.push({t:'go',p:STAND[name],name:name});
+    queue.push(...planRoute(name));
     queue.push({t:'exec',name:name,op:op||'toggle'});
   },
   emote:startEmote,
@@ -951,41 +1345,57 @@ function updateLight(){
   FILL.color.set(roomNight?0x000000:0xffffff);
   if(BOLDMAT)BOLDMAT.color.set(roomNight?0xffffff:0x000000);
   if(BOLDMAT_OUT)BOLDMAT_OUT.color.set(lightState.night?0xffffff:0x000000);
-  for(const m of steamMats)m.color.set(roomNight?0xffffff:0x000000);
+  for(const m of TINT)m.color.set(roomNight?0xffffff:0x000000);
   OUTFILL.color.set(lightState.night?0x000000:0xffffff);
   OUTMAT.color.set(lightState.night?0xffffff:0x000000);
-  const wOpen=windowIt.p>0.4;
+  const wOpen=windowIt.p>0.4||inYard();   // 小线在院子里也听得见窗外/院外的动静
   RoomAudio.loop('dayAmb',!lightState.night&&wOpen);
   RoomAudio.loop('nightAmb',lightState.night&&wOpen);
   RoomAudio.loop('hum',lightState.night&&lightState.switchOn);
 }
 
-/* lamp cone: lit volume renders in day palette via clipping planes */
-const coneA=new THREE.Vector3(-4.8,3.15,-1.65);
-const conePlanes=[];
-for(let k=0;k<24;k++){
-  const ph=k*Math.PI/12;
-  const n=new THREE.Vector3(-3.12*Math.cos(ph),-1.25,-3.12*Math.sin(ph)).normalize();
-  const pl=new THREE.Plane(n,-n.dot(coneA));
-  pl.userData={c:-n.dot(coneA)};
-  conePlanes.push(pl);
+/* --- 灯：24 个裁剪面围成一个无限光锥，「锥内」用白天配色重画一遍。
+       clippingPlanes 只能表达「与」，两盏灯是「或」，所以做法是**一盏亮着的灯多画一遍**。
+       台灯那盏的参数是从原来的 coneA / (-3.12,-1.25,-3.12) 逐字搬过来的，夜景基线一个数没动。 --- */
+function cone(cx,cy,cz,spread,ratio){
+  const A=new THREE.Vector3(cx,cy,cz),arr=[];
+  for(let k=0;k<24;k++){
+    const ph=k*Math.PI/12;
+    const n=new THREE.Vector3(-spread*Math.cos(ph),-ratio,-spread*Math.sin(ph)).normalize();
+    const pl=new THREE.Plane(n,-n.dot(A));
+    pl.userData={c:-n.dot(A)};
+    arr.push(pl);
+  }
+  return arr;
 }
-MAT.clippingPlanes=conePlanes;
-FILL.clippingPlanes=conePlanes;
-function setClip(on){for(const p of conePlanes)p.constant=on?p.userData.c:1e10;}
-setClip(false);
+const LIGHTS=[
+  {planes:cone(-4.80,3.15,-1.65,3.12,1.25),on:()=>lampIt.p>0.55},        // 台灯（原样）
+  {planes:cone(-4.25,2.35,-7.45,1.60,1.00),on:()=>devOn(DEV.lantern)>0}  // 灯笼
+];
+function applyClip(planes){
+  MAT.clippingPlanes=planes;
+  FILL.clippingPlanes=planes;
+  for(const m of TINT)m.clippingPlanes=planes;
+}
+function setClip(planes,on){for(const p of planes)p.constant=on?p.userData.c:1e10;}
+applyClip(null);
 function renderNightLit(){
   const BG=scene.background;
-  setClip(false);
+  applyClip(null);
   renderer.autoClear=true;
   renderer.render(scene,camera);
-  setClip(true);
-  renderer.autoClear=false;
   scene.background=null;
+  renderer.autoClear=false;
   MAT.color.set(0x000000);FILL.color.set(0xffffff);
-  renderer.render(scene,camera);
+  for(const L of LIGHTS){
+    if(!L.on())continue;
+    applyClip(L.planes);
+    setClip(L.planes,true);
+    renderer.render(scene,camera);
+    setClip(L.planes,false);
+  }
   MAT.color.set(0xffffff);FILL.color.set(0x000000);
-  setClip(false);
+  applyClip(null);
   scene.background=BG;
 }
 
@@ -1004,7 +1414,8 @@ function animate(){
   }
   updateLight();
   updateLife(dt,t);
-  if(lightState.night&&!lightState.switchOn&&lampIt.p>0.55) renderNightLit();
+  stepCamera(dt);
+  if(lightState.night&&!lightState.switchOn&&LIGHTS.some(L=>L.on())) renderNightLit();
   else{renderer.autoClear=true;renderer.render(scene,camera);}
 }
 animate();

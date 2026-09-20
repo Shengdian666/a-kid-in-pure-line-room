@@ -155,7 +155,23 @@ window.RoomAudio=(function(){
     switchOff(){click(900,0.028,0.06);setTimeout(()=>click(700,0.02,0.04),70);},
     chair(){noise({dur:0.75,f:260,q:0.8,g:0.055,a:0.1});},
     chime(){chimeMotif(0.018);},
-    plant(){noise({dur:0.35,f:1500,q:0.7,g:0.04,a:0.02});}
+    plant(){noise({dur:0.35,f:1500,q:0.7,g:0.04,a:0.02});},
+
+    /* ---------- 院子 ---------- */
+    lantern(){tone({type:'sine',f:2093,dur:1.1,g:0.05});tone({type:'sine',f:3136,dur:0.8,g:0.02});tone({type:'sine',f:1046,dur:1.5,g:0.016});},
+    water(){
+      for(let i=0;i<3;i++)noise({t:now()+i*0.14,dur:0.5-i*0.1,f:520+i*180,q:1.6,g:0.045-i*0.009,a:0.05});
+      [0.30,0.62,0.95].forEach((d,i)=>tone({type:'sine',f:900+i*320,f2:420,t:now()+d,dur:0.14,g:0.03}));
+    },
+    leaves(){for(let i=0;i<7;i++)noise({t:now()+i*0.07,dur:0.22,f:2600+Math.random()*1600,q:0.9,g:0.026});},
+    swing(){squeak(1,0.5,0.045);setTimeout(()=>squeak(-1,0.42,0.035),420);},
+    teapot(){
+      for(let i=0;i<5;i++)noise({t:now()+i*0.16,dur:0.2,f:900+i*140,q:1.4,g:0.03});
+      tone({type:'sine',f:1400,f2:900,dur:0.7,g:0.028});
+    },
+    gate(){squeak(1,0.7,0.05);clack(0.62,0.075);},
+    cloth(){for(let i=0;i<4;i++)noise({t:now()+i*0.09,dur:0.16,f:1800+i*260,q:0.8,g:0.032});},
+    bloom(){[1046,1318,1568,2093,2637].forEach((f,i)=>tone({type:'sine',f:f,t:now()+i*0.075,dur:0.6,g:0.026}));}
   };
 
   /* ---------- continuous loops ---------- */

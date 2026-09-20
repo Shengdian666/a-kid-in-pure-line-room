@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node *)",
+      "Bash(PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe *)",
+      "Bash(./.venv/Scripts/python.exe -m uvicorn main:app --port 8010)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -X POST http://127.0.0.1:8010/chat -H \"Content-Type: application/json\" -d '{\"text\":\"去院子里把灯笼点上\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8010/chat -H \"Content-Type: application/json\" -d '{\"text\":\"去院子\"}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8010/chat -H \"Content-Type: application/json\" --data-binary @_req.json)",
+      "Bash(./.venv/Scripts/python.exe -c \"import sys,json,io; sys.stdout.reconfigure\\(encoding='utf-8'\\); d=json.load\\(sys.stdin\\); print\\('reply :',d.get\\('reply'\\)\\); print\\('actions:',d.get\\('actions'\\)\\); print\\('emote :',d.get\\('emote'\\)\\)\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8010/chat -H \"Content-Type: application/json\" --data-binary @../_req.json)",
+      "Read(//e/e/pure-line-room-main/**)",
+      "Bash(curl -s -X POST http://127.0.0.1:8011/chat -H \"Content-Type: application/json\" --data-binary @_req.json)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 93680 //F)",
+      "Bash(taskkill //PID 103920 //F)",
+      "Bash(server/.venv/Scripts/python.exe *)",
+      "Bash(.venv/Scripts/python.exe -m uvicorn main:app --reload --port 8000)",
+      "Bash(curl -s http://127.0.0.1:8000/health2)",
+      "Bash(curl -s -m 3 http://127.0.0.1:8000/health)"
+    ]
+  }
+}

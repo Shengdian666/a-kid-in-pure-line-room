@@ -56,7 +56,7 @@ class Session:
         from devices import DEVICES
 
         for name, val in self.room.items():
-            if name not in DEVICES or DEVICES[name]["kind"] == "pulse":
+            if name not in DEVICES or DEVICES[name]["kind"] in ("pulse", "zone"):
                 continue
             if self.prev_room.get(name) != val:
                 return f"{name}：{'开着' if val else '关着'}"
